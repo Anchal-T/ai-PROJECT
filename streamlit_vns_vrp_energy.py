@@ -7,12 +7,12 @@ import time
 
 # --- Constants & Parameters ---
 DEFAULT_DRONE_PARAMS = {
-    'capacity': 5.0,       # Max payload (kg)
-    'w0': 6.0,             # Drone curb weight (kg)
-    'gamma': 4.0,          # Energy for takeoff/landing (Wh/kg/km)
+    'capacity': 10.0,       # Max payload (kg)
+    'w0': 10.0,             # Drone curb weight (kg)
+    'gamma': 2.0,          # Energy for takeoff/landing (Wh/kg/km)
     'rho': 3.5,            # Energy for flight (Wh/kg/km)
     'H': 0.05,             # Fixed flight height (km)
-    'E': 504.0,            # Max battery energy (Wh)
+    'E': 1000.0,            # Max battery energy (Wh)
     'speed': 40.0          # Average speed (km/h)
 }
 MAX_ITERATIONS_VNS = 50
@@ -24,19 +24,19 @@ route_cache = {}
 # --- Helper Functions ---
 
 def calculate_distance(p1, p2):
-    """Calculate Euclidean distance."""
+    """Calculate Euclidean distance between two points."""
     return np.linalg.norm(np.array(p1) - np.array(p2))
 
 def calculate_energy_consumption(dist, payload, height, params):
-    """Calculate energy based on simplified Eq. 1."""
+    """Calculate energy consumption based on distance, payload, and height."""
     return (params['gamma'] * height + params['rho'] * dist) * (params['w0'] + payload)
 
 def get_route_key(route_indices):
-    """Get a hashable key for caching."""
+    """Generate a hashable key for route caching."""
     return tuple(route_indices)
 
 def calculate_route_details(route_indices, cities, depot_coord, demands, params):
-    """Calculate route details with caching."""
+    """Calculate route details including distance, energy, and feasibility."""
     route_key = get_route_key(route_indices)
     if route_key in route_cache:
         return route_cache[route_key]
@@ -50,7 +50,7 @@ def calculate_route_details(route_indices, cities, depot_coord, demands, params)
     current_payload = sum(demands[i] for i in route_indices)
     current_energy = params['E']
     current_time = 0
-    details = {'arrival_times': {}, 'total_time': 0, 'max_payload_violation': False, 'energy_violation': False}
+    details = {'arrival_times': {}, 'total_time': 0}
 
     if current_payload > params['capacity']:
         result = {'feasible': False, 'infeasibility_reason': f'Payload {current_payload:.2f} > {params["capacity"]:.2f}'}
@@ -67,7 +67,7 @@ def calculate_route_details(route_indices, cities, depot_coord, demands, params)
             return result
         current_energy -= energy_needed
         total_dist += dist
-        time_taken = dist / params['speed'] * 3600
+        time_taken = dist / params['speed'] * 3600  # Convert to seconds
         current_time += time_taken
         if i < len(route_indices):
             details['arrival_times'][route_indices[i]] = current_time
@@ -82,7 +82,7 @@ def calculate_route_details(route_indices, cities, depot_coord, demands, params)
     return details
 
 def calculate_total_objective(solution, cities, depots, demands, params):
-    """Calculate total sum of arrival times and feasibility."""
+    """Compute total objective (sum of arrival times) and check feasibility."""
     total_sum_arrival_times = 0
     all_feasible = True
     max_vehicles_per_depot = params.get('max_vehicles_per_depot', 100)
@@ -99,16 +99,15 @@ def calculate_total_objective(solution, cities, depots, demands, params):
             route_details = calculate_route_details(route_indices, cities, depot_coord, demands, params)
             if not route_details['feasible']:
                 all_feasible = False
-                depot_details.append(route_details)
             else:
                 total_sum_arrival_times += sum(route_details['arrival_times'].values())
-                depot_details.append(route_details)
+            depot_details.append(route_details)
         details_list.append(depot_details)
 
     return total_sum_arrival_times if all_feasible else float('inf'), all_feasible, details_list
 
-def plot_vrp_solution(cities, depots, solution, title, ax):
-    """Plot the VRP solution."""
+def plot_vrp_solution(cities, depots, solution, title, ax, demands, params):
+    """Visualize the VRP solution with routes colored by feasibility."""
     ax.clear()
     colors = plt.cm.get_cmap('tab10', len(depots) + sum(len(routes) for routes in solution))
     customer_coords = np.array(cities)
@@ -126,7 +125,8 @@ def plot_vrp_solution(cities, depots, solution, title, ax):
         for route_indices in depot_routes:
             if not route_indices:
                 continue
-            route_color = colors(route_counter % colors.N)
+            details = calculate_route_details(route_indices, cities, depot_coord, demands, params)
+            route_color = 'red' if not details['feasible'] else colors(route_counter % colors.N)
             path_coords = [depot_coord] + [cities[i] for i in route_indices] + [depot_coord]
             path_coords = np.array(path_coords)
             ax.plot(path_coords[:, 0], path_coords[:, 1], '-', color=route_color, lw=1.5, alpha=0.8, label=f"D{depot_idx}-R{route_counter}")
@@ -146,7 +146,7 @@ def plot_vrp_solution(cities, depots, solution, title, ax):
 # --- Initial Solution Heuristic ---
 
 def savings_algorithm(cities, depots, demands, params):
-    """Clarke-Wright savings algorithm for initial solution."""
+    """Generate an initial solution using the Clarke-Wright savings algorithm."""
     num_customers = len(cities)
     num_depots = len(depots)
     solution = [[] for _ in range(num_depots)]
@@ -201,7 +201,7 @@ def savings_algorithm(cities, depots, demands, params):
     return solution
 
 def simple_greedy_insertion(cities, depots, demands, params):
-    """Greedy insertion heuristic."""
+    """Generate an initial solution using a greedy insertion heuristic."""
     num_customers = len(cities)
     num_depots = len(depots)
     solution = [[] for _ in range(num_depots)]
@@ -242,7 +242,7 @@ def simple_greedy_insertion(cities, depots, demands, params):
 # --- VNS Neighborhood Operators ---
 
 def apply_relocate(solution, depot1, route_idx1, cust_pos1, depot2, route_idx2, pos2):
-    """Relocate a customer between routes."""
+    """Relocate a customer from one route to another."""
     new_solution = copy.deepcopy(solution)
     if (depot1 >= len(new_solution) or route_idx1 >= len(new_solution[depot1]) or cust_pos1 >= len(new_solution[depot1][route_idx1]) or
         depot2 >= len(new_solution) or route_idx2 >= len(new_solution[depot2]) or pos2 > len(new_solution[depot2][route_idx2])):
@@ -269,7 +269,7 @@ def apply_exchange(solution, depot1, route_idx1, cust_pos1, depot2, route_idx2, 
     return new_solution
 
 def apply_two_opt_intra(solution, depot_idx, route_idx, i, k):
-    """Apply 2-opt swap within a route."""
+    """Perform a 2-opt swap within a single route."""
     new_solution = copy.deepcopy(solution)
     if (depot_idx >= len(new_solution) or route_idx >= len(new_solution[depot_idx]) or
         i >= k or k >= len(new_solution[depot_idx][route_idx])):
@@ -278,8 +278,8 @@ def apply_two_opt_intra(solution, depot_idx, route_idx, i, k):
     new_solution[depot_idx][route_idx] = route[:i] + route[i:k + 1][::-1] + route[k + 1:]
     return new_solution
 
-def explore_neighborhood(solution, operator_type, cities, depots, demands, params, current_objective, max_evaluations=1000):
-    """Explore a neighborhood for an improving solution."""
+def explore_neighborhood(solution, operator_type, cities, depots, demands, params, current_objective, max_evaluations=5000):
+    """Explore a neighborhood to find an improving feasible solution."""
     evaluations = 0
     moves = []
     if operator_type == 'relocate':
@@ -344,7 +344,6 @@ def shake_solution(solution, strength, cities, depots, demands, params):
             if len(positions) < 2:
                 continue
             pos1, pos2 = random.sample(positions, 2)
-            neighbor = apply_exchange(shaken_solution, pos1[0], pos1[1], pos1[2], pos2[0], pos2[1], pos2[2])
         else:
             routes = [(d, r_idx) for d in range(len(shaken_solution)) for r_idx, r in enumerate(shaken_solution[d]) if len(r) >= 2]
             if not routes:
@@ -354,17 +353,17 @@ def shake_solution(solution, strength, cities, depots, demands, params):
             i, k = sorted(random.sample(range(len(route)), 2))
             neighbor = apply_two_opt_intra(shaken_solution, d, r_idx, i, k)
 
-        if neighbor:
-            _, feasible, _ = calculate_total_objective(neighbor, cities, depots, demands, params)
-            if feasible:
-                shaken_solution = neighbor
-                moves_applied += 1
+            if neighbor:
+                _, feasible, _ = calculate_total_objective(neighbor, cities, depots, demands, params)
+                if feasible:
+                    shaken_solution = neighbor
+                    moves_applied += 1
     return shaken_solution
 
 # --- VNS Solver ---
 
 def vns_solver(cities, depots, demands, params, plot_placeholder, status_placeholder, length_placeholder, fig, ax):
-    """Perform Variable Neighborhood Search."""
+    """Execute Variable Neighborhood Search to optimize the VRP solution."""
     global route_cache
     route_cache = {}
     progress_bar = st.progress(0)
@@ -411,7 +410,7 @@ def vns_solver(cities, depots, demands, params, plot_placeholder, status_placeho
                 current_solution = neighbor_solution
                 current_obj = neighbor_obj
                 current_obj_metric.value = f"{current_obj:.2f}"
-                plot_vrp_solution(cities, depots, current_solution, f"Iter {iter_vns} - N_{k} Improved (Obj: {current_obj:.2f})", ax)
+                plot_vrp_solution(cities, depots, current_solution, f"Iter {iter_vns} - N_{k} Improved (Obj: {current_obj:.2f})", ax, demands, params)
                 plot_placeholder.pyplot(fig)
                 k = 0
                 if current_obj < best_obj:
@@ -434,7 +433,7 @@ def vns_solver(cities, depots, demands, params, plot_placeholder, status_placeho
                 current_solution = copy.deepcopy(best_solution)
                 current_obj = best_obj
             current_obj_metric.value = f"{current_obj:.2f}"
-            plot_vrp_solution(cities, depots, current_solution, f"Iter {iter_vns} - After Shake (Obj: {current_obj:.2f})", ax)
+            plot_vrp_solution(cities, depots, current_solution, f"Iter {iter_vns} - After Shake (Obj: {current_obj:.2f})", ax, demands, params)
             plot_placeholder.pyplot(fig)
             iter_no_improve += 1
 
@@ -454,7 +453,7 @@ def vns_solver(cities, depots, demands, params, plot_placeholder, status_placeho
     ax_conv.grid(True)
     st.pyplot(fig_conv)
 
-    plot_vrp_solution(cities, depots, best_solution, f"Final Best Solution (Obj: {best_obj:.2f})", ax)
+    plot_vrp_solution(cities, depots, best_solution, f"Final Best Solution (Obj: {best_obj:.2f})", ax, demands, params)
     plot_placeholder.pyplot(fig)
     length_placeholder.metric("Final Objective", f"{best_obj:.2f}")
     return best_solution, best_obj
@@ -485,44 +484,44 @@ with col2:
 
 # Button Actions
 if st.sidebar.button("Generate New Instance", key='generate_vrp'):
-    route_cache = {}  # No global needed in main script body
+    route_cache = {}
     st.session_state.cities = (np.random.rand(num_customers, 2) * 100).tolist()
     st.session_state.demands = (np.random.rand(num_customers) * 0.9 + 0.1).tolist()
     st.session_state.depots = [(random.uniform(10, 90), random.uniform(10, 90)) for _ in range(num_depots)]
     fig, ax = plt.subplots(figsize=(10, 7))
-    plot_vrp_solution(st.session_state.cities, st.session_state.depots, [], "Generated Instance", ax)
+    plot_vrp_solution(st.session_state.cities, st.session_state.depots, [], "Generated Instance", ax, st.session_state.demands, params)
     plot_placeholder.pyplot(fig)
 
 if st.sidebar.button("Run VNS Solver", key='solve_vns'):
     if 'cities' not in st.session_state:
         st.sidebar.error("Please generate an instance first.")
     else:
-            route_cache = {}  # No global needed in main script body
-            length_placeholder.text("")
-            details_placeholder.text("")
-            fig, ax = plt.subplots(figsize=(10, 7))
-            start_time = time.time()
-            best_solution, best_objective = vns_solver(
-                st.session_state.cities, st.session_state.depots, st.session_state.demands, params,
-                plot_placeholder, status_placeholder, length_placeholder, fig, ax)
-            end_time = time.time()
-            st.session_state.solution = best_solution
-            st.session_state.objective = best_objective
-            if best_solution is not None:
-                _, _, final_details = calculate_total_objective(best_solution, st.session_state.cities, st.session_state.depots, st.session_state.demands, params)
-                details_str = "Final Route Details:\n"
-                route_count = 0
-                for d_idx, depot_routes in enumerate(final_details):
-                    details_str += f"Depot {d_idx}:\n"
-                    for r_idx, r_details in enumerate(depot_routes):
-                        route_indices = best_solution[d_idx][r_idx]
-                        if r_details['feasible']:
-                            details_str += f"  Route {route_count}: {' -> '.join(map(str, route_indices))}\n"
-                            details_str += f"    Dist: {r_details['distance']:.2f} km, Energy: {r_details['energy']:.2f} Wh, SumTimes: {sum(r_details['arrival_times'].values()):.2f} s\n"
-                        else:
-                            details_str += f"  Route {route_count} (Infeasible): {r_details.get('infeasibility_reason', 'Unknown')}\n"
-                        route_count += 1
-                details_placeholder.text_area("Route Details", details_str, height=200)
+        route_cache = {}
+        length_placeholder.text("")
+        details_placeholder.text("")
+        fig, ax = plt.subplots(figsize=(10, 7))
+        start_time = time.time()
+        best_solution, best_objective = vns_solver(
+            st.session_state.cities, st.session_state.depots, st.session_state.demands, params,
+            plot_placeholder, status_placeholder, length_placeholder, fig, ax)
+        end_time = time.time()
+        st.session_state.solution = best_solution
+        st.session_state.objective = best_objective
+        if best_solution is not None:
+            _, _, final_details = calculate_total_objective(best_solution, st.session_state.cities, st.session_state.depots, st.session_state.demands, params)
+            details_str = "Final Route Details:\n"
+            route_count = 0
+            for d_idx, depot_routes in enumerate(final_details):
+                details_str += f"Depot {d_idx}:\n"
+                for r_idx, r_details in enumerate(depot_routes):
+                    route_indices = best_solution[d_idx][r_idx]
+                    if r_details['feasible']:
+                        details_str += f"  Route {route_count}: {' -> '.join(map(str, route_indices))}\n"
+                        details_str += f"    Dist: {r_details['distance']:.2f} km, Energy: {r_details['energy']:.2f} Wh, SumTimes: {sum(r_details['arrival_times'].values()):.2f} s\n"
+                    else:
+                        details_str += f"  Route {route_count} (Infeasible): {r_details.get('infeasibility_reason', 'Unknown')}\n"
+                    route_count += 1
+            details_placeholder.text_area("Route Details", details_str, height=200)
 
 # Display Initial/Last State
 if 'cities' in st.session_state:
@@ -530,10 +529,10 @@ if 'cities' in st.session_state:
     title = "Current VRP Instance"
     if 'solution' in st.session_state and st.session_state.solution is not None:
         title = f"Last Solution (Obj: {st.session_state.objective:.2f})"
-        plot_vrp_solution(st.session_state.cities, st.session_state.depots, st.session_state.solution, title, ax)
+        plot_vrp_solution(st.session_state.cities, st.session_state.depots, st.session_state.solution, title, ax, st.session_state.demands, params)
         length_placeholder.metric("Last Objective", f"{st.session_state.objective:.2f}")
     else:
-        plot_vrp_solution(st.session_state.cities, st.session_state.depots, [], title, ax)
+        plot_vrp_solution(st.session_state.cities, st.session_state.depots, [], title, ax, st.session_state.demands, params)
     plot_placeholder.pyplot(fig)
 else:
     status_placeholder.info("Click 'Generate New Instance' in the sidebar.")

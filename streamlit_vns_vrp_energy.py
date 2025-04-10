@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import random
 import copy
 import time
+from collections import defaultdict
 
 # --- Constants & Parameters (Based on Paper/Defaults) ---
 # These would need to be adjusted for a real scenario
@@ -25,6 +26,9 @@ MAX_ITER_NO_IMPROVEMENT_VNS = 15
 NEIGHBORHOOD_ORDER_VNS = ['relocate', 'exchange', 'two_opt_intra'] # Subset from Table I [cite: 203, 204, 205]
 SHAKE_STRENGTH_VNS = 3 # Number of random moves in shake
 
+# Cache to store route calculations
+route_cache = {}
+
 # --- Helper Functions ---
 
 def calculate_distance(p1, p2):
@@ -35,18 +39,28 @@ def calculate_energy_consumption(dist, payload, height, params):
     """Calculates energy based on Eq. 1 from the paper."""
     # R_ij^k = gamma * H_ij^k * (w0 + w_ij^k) + rho * L_ij * (w0 + w_ij^k)
     # Simplified: assume H is constant, payload w_ij^k is average for segment for simplicity
-    # A more accurate calculation would track payload changes *within* the segment.
-    # Using payload *at start* of segment as approximation.
     energy = (params['gamma'] * height + params['rho'] * dist) * (params['w0'] + payload) # [cite: 85]
     return energy
+
+def get_route_key(route_indices):
+    """Get a hashable key for caching route details."""
+    return tuple(route_indices)
 
 def calculate_route_details(route_indices, cities, depot_coord, demands, params):
     """
     Calculates total distance, arrival times, payload, energy consumption, and feasibility for a single route.
     Returns details dict or None if infeasible.
+    Uses caching for performance.
     """
+    # Check cache first
+    route_key = get_route_key(route_indices)
+    if route_key in route_cache:
+        return route_cache[route_key]
+    
     if not route_indices:
-        return {'distance': 0, 'arrival_times': {}, 'total_time': 0, 'energy': 0, 'feasible': True, 'infeasibility_reason': None}
+        result = {'distance': 0, 'arrival_times': {}, 'total_time': 0, 'energy': 0, 'feasible': True, 'infeasibility_reason': None}
+        route_cache[route_key] = result
+        return result
 
     total_dist = 0
     current_payload = sum(demands[i] for i in route_indices)
@@ -58,7 +72,9 @@ def calculate_route_details(route_indices, cities, depot_coord, demands, params)
     # Check initial capacity
     if current_payload > params['capacity']:
         details['max_payload_violation'] = True
-        return {'feasible': False, 'infeasibility_reason': f'Initial payload {current_payload:.2f} exceeds capacity {params["capacity"]:.2f}'}
+        result = {'feasible': False, 'infeasibility_reason': f'Initial payload {current_payload:.2f} exceeds capacity {params["capacity"]:.2f}'}
+        route_cache[route_key] = result
+        return result
 
     route_path = [depot_coord] + [cities[i] for i in route_indices] + [depot_coord]
 
@@ -66,7 +82,10 @@ def calculate_route_details(route_indices, cities, depot_coord, demands, params)
     dist_to_first = calculate_distance(depot_coord, cities[route_indices[0]])
     energy_needed = calculate_energy_consumption(dist_to_first, current_payload, params['H'], params)
     if energy_needed > current_energy:
-        return {'feasible': False, 'infeasibility_reason': f'Not enough energy for first leg ({energy_needed:.2f} > {current_energy:.2f})'}
+        result = {'feasible': False, 'infeasibility_reason': f'Not enough energy for first leg ({energy_needed:.2f} > {current_energy:.2f})'}
+        route_cache[route_key] = result
+        return result
+    
     current_energy -= energy_needed
     total_dist += dist_to_first
     time_taken = dist_to_first / params['speed'] * 3600 # time in seconds
@@ -82,7 +101,10 @@ def calculate_route_details(route_indices, cities, depot_coord, demands, params)
         dist = calculate_distance(cities[idx_u], cities[idx_v])
         energy_needed = calculate_energy_consumption(dist, current_payload, params['H'], params)
         if energy_needed > current_energy:
-             return {'feasible': False, 'infeasibility_reason': f'Energy fail at C{idx_u}->C{idx_v} ({energy_needed:.2f} > {current_energy:.2f})'}
+             result = {'feasible': False, 'infeasibility_reason': f'Energy fail at C{idx_u}->C{idx_v} ({energy_needed:.2f} > {current_energy:.2f})'}
+             route_cache[route_key] = result
+             return result
+        
         current_energy -= energy_needed
         total_dist += dist
         time_taken = dist / params['speed'] * 3600
@@ -90,14 +112,16 @@ def calculate_route_details(route_indices, cities, depot_coord, demands, params)
         details['arrival_times'][idx_v] = current_time
         last_coord = cities[idx_v]
 
-
     # Fly back to depot
     idx_last = route_indices[-1]
     current_payload -= demands[idx_last] # Payload after last customer
     dist_to_depot = calculate_distance(cities[idx_last], depot_coord)
     energy_needed = calculate_energy_consumption(dist_to_depot, current_payload, params['H'], params)
     if energy_needed > current_energy:
-        return {'feasible': False, 'infeasibility_reason': f'Energy fail C{idx_last}->Depot ({energy_needed:.2f} > {current_energy:.2f})'}
+        result = {'feasible': False, 'infeasibility_reason': f'Energy fail C{idx_last}->Depot ({energy_needed:.2f} > {current_energy:.2f})'}
+        route_cache[route_key] = result
+        return result
+    
     current_energy -= energy_needed
     total_dist += dist_to_depot
     # Don't add time for return to depot to objective as per Eq. 2 (sum arrival times at customers) [cite: 90]
@@ -107,6 +131,9 @@ def calculate_route_details(route_indices, cities, depot_coord, demands, params)
     details['total_time'] = current_time # Last arrival time
     details['feasible'] = True
     details['infeasibility_reason'] = None
+    
+    # Cache the result
+    route_cache[route_key] = details
     return details
 
 
@@ -159,7 +186,7 @@ def plot_vrp_solution(cities, depots, solution, title, ax):
     for i, depot in enumerate(depots):
         ax.text(depot[0] + 0.5, depot[1] + 0.5, f"D{i}", fontsize=9, color='red')
 
-    # Plot routes
+    # Plot routes with details
     route_counter = 0
     for depot_idx, depot_routes in enumerate(solution):
         depot_coord = depots[depot_idx]
@@ -170,6 +197,23 @@ def plot_vrp_solution(cities, depots, solution, title, ax):
             path_coords = [depot_coord] + [cities[i] for i in route_indices] + [depot_coord]
             path_coords = np.array(path_coords)
             ax.plot(path_coords[:, 0], path_coords[:, 1], '-', color=route_color, lw=1.5, alpha=0.8, label=f"D{depot_idx}-R{route_counter}")
+            
+            # Add distance labels to route segments for better visualization
+            total_distance = 0
+            for i in range(len(path_coords)-1):
+                p1, p2 = path_coords[i], path_coords[i+1]
+                dist = calculate_distance(p1, p2)
+                total_distance += dist
+                # Add small distance labels (optional)
+                #midpoint = (p1 + p2) / 2
+                #ax.text(midpoint[0], midpoint[1], f"{dist:.1f}", fontsize=6, color=route_color)
+            
+            # Add total route distance near the first segment
+            if len(path_coords) > 2:
+                midpoint = (path_coords[0] + path_coords[1]) / 2
+                ax.text(midpoint[0], midpoint[1] - 2, f"R{route_counter}: {total_distance:.1f}km", 
+                        fontsize=7, color=route_color, bbox=dict(facecolor='white', alpha=0.7, pad=1))
+                
             route_counter += 1
 
     ax.set_title(title)
@@ -182,6 +226,119 @@ def plot_vrp_solution(cities, depots, solution, title, ax):
 
 
 # --- Initial Solution Heuristic ---
+def savings_algorithm(cities, depots, demands, params):
+    """
+    Implements Clarke-Wright savings algorithm for better initial solutions.
+    Returns a solution for multiple depots.
+    """
+    global route_cache
+    route_cache = {}  # Clear cache for new problem instance
+    
+    solution = [[] for _ in range(len(depots))]
+    assigned = set()
+    num_customers = len(cities)
+    
+    # For each depot, create routes
+    for d_idx, depot in enumerate(depots):
+        # Start with individual routes (depot -> customer -> depot)
+        individual_routes = []
+        for c in range(num_customers):
+            if c in assigned:
+                continue
+            
+            # Check if customer can be served from this depot
+            route = [c]
+            route_details = calculate_route_details(route, cities, depot, demands, params)
+            if route_details and route_details['feasible']:
+                individual_routes.append(route)
+            
+        # Calculate savings for all pairs
+        savings = []
+        for i, route_i in enumerate(individual_routes):
+            for j, route_j in enumerate(individual_routes):
+                if i != j:
+                    # Calculate savings: dist(0,i) + dist(0,j) - dist(i,j)
+                    # where 0 is depot, i is last of route_i, j is first of route_j
+                    i_last = route_i[-1]
+                    j_first = route_j[0]
+                    
+                    dist_0_i = calculate_distance(depot, cities[i_last])
+                    dist_0_j = calculate_distance(depot, cities[j_first])
+                    dist_i_j = calculate_distance(cities[i_last], cities[j_first])
+                    
+                    saving = dist_0_i + dist_0_j - dist_i_j
+                    savings.append((saving, i, j))
+        
+        # Sort savings in descending order
+        savings.sort(reverse=True)
+        
+        # Merge routes using savings
+        merged = [False] * len(individual_routes)
+        depot_routes = []
+        
+        # Try merging based on savings
+        for saving, i, j in savings:
+            if merged[i] or merged[j]:
+                continue
+                
+            merged_route = individual_routes[i] + individual_routes[j]
+            route_details = calculate_route_details(merged_route, cities, depot, demands, params)
+            
+            if route_details and route_details['feasible']:
+                # Successfully merged
+                depot_routes.append(merged_route)
+                merged[i] = merged[j] = True
+        
+        # Add routes that couldn't be merged
+        for i, route in enumerate(individual_routes):
+            if not merged[i]:
+                depot_routes.append(route)
+        
+        # Add to solution and mark customers as assigned
+        for route in depot_routes:
+            solution[d_idx].append(route)
+            for c in route:
+                assigned.add(c)
+    
+    # Assign remaining customers using simple greedy insertion
+    unassigned = [c for c in range(num_customers) if c not in assigned]
+    if unassigned:
+        for c in unassigned:
+            best_cost = float('inf')
+            best_insertion = None
+            
+            for d_idx, depot in enumerate(depots):
+                for r_idx, route in enumerate(solution[d_idx]):
+                    for pos in range(len(route) + 1):
+                        new_route = route[:pos] + [c] + route[pos:]
+                        route_details = calculate_route_details(new_route, cities, depot, demands, params)
+                        
+                        if route_details and route_details['feasible']:
+                            # Use energy consumption as cost metric
+                            cost = route_details['energy']
+                            if cost < best_cost:
+                                best_cost = cost
+                                best_insertion = (d_idx, r_idx, pos)
+            
+            # Insert customer at best position found
+            if best_insertion:
+                d_idx, r_idx, pos = best_insertion
+                solution[d_idx][r_idx].insert(pos, c)
+                assigned.add(c)
+            else:
+                # Try creating new routes for remaining customers
+                for d_idx, depot in enumerate(depots):
+                    if len(solution[d_idx]) < params.get('max_vehicles_per_depot', float('inf')):
+                        route = [c]
+                        route_details = calculate_route_details(route, cities, depot, demands, params)
+                        if route_details and route_details['feasible']:
+                            solution[d_idx].append(route)
+                            assigned.add(c)
+                            break
+    
+    return solution
+
+
 def simple_greedy_insertion(cities, depots, demands, params):
     """Very basic greedy insertion heuristic respecting constraints."""
     num_customers = len(cities)
@@ -210,7 +367,6 @@ def simple_greedy_insertion(cities, depots, demands, params):
                     route_details = calculate_route_details(new_route, cities, depots[d_idx], demands, params)
                     if route_details and route_details['feasible']:
                         # Use increase in sum of arrival times as cost proxy (simplified)
-                        # This is not perfect, a better heuristic would use Eq 2 directly
                         cost_increase = demands[cust_idx] # Very rough proxy
                         if cost_increase < best_insertion_cost:
                              best_insertion_cost = cost_increase
@@ -303,13 +459,16 @@ def apply_two_opt_intra(solution, depot_idx, route_idx, i, k):
     return new_solution
 
 
-def explore_neighborhood(solution, operator_type, cities, depots, demands, params, current_objective):
-    """Explores a neighborhood using the specified operator type (first improvement)."""
+def explore_neighborhood(solution, operator_type, cities, depots, demands, params, current_objective, max_evaluations=1000):
+    """Explores a neighborhood using the specified operator type (first improvement) with a limit on evaluations."""
     best_neighbor = None
     best_neighbor_objective = current_objective
-
+    evaluations = 0
+    
+    # Use randomization for better exploration
     if operator_type == 'relocate':
-        # Iterate through all customers and all possible insertion points
+        # Generate all possible relocate moves
+        relocate_moves = []
         for d1 in range(len(solution)):
             for r1_idx, r1 in enumerate(solution[d1]):
                 for c1_pos in range(len(r1)):
@@ -319,53 +478,76 @@ def explore_neighborhood(solution, operator_type, cities, depots, demands, param
                             for c2_pos in range(len(r2) + 1):
                                 # Avoid moving to the exact same spot if routes are the same
                                 if d1==d2 and r1_idx==r2_idx and c1_pos == c2_pos: continue
-
-                                neighbor = apply_relocate(solution, d1, r1_idx, c1_pos, d2, r2_idx, c2_pos)
-                                if neighbor:
-                                    obj, feasible, _ = calculate_total_objective(neighbor, cities, depots, demands, params)
-                                    if feasible and obj < best_neighbor_objective:
-                                        # Found improving feasible neighbor - return immediately (first improvement)
-                                        return neighbor, obj
-                        # Also try inserting into a potential new route for depot d2 (if allowed)
-                        # (Simplified: Not implementing adding new routes in local search here)
+                                relocate_moves.append((d1, r1_idx, c1_pos, d2, r2_idx, c2_pos))
+        
+        # Randomize the order for better exploration
+        random.shuffle(relocate_moves)
+        for move in relocate_moves:
+            d1, r1_idx, c1_pos, d2, r2_idx, c2_pos = move
+            neighbor = apply_relocate(solution, d1, r1_idx, c1_pos, d2, r2_idx, c2_pos)
+            if neighbor:
+                evaluations += 1
+                obj, feasible, _ = calculate_total_objective(neighbor, cities, depots, demands, params)
+                if feasible and obj < best_neighbor_objective:
+                    return neighbor, obj, evaluations  # First improvement
+                
+                if evaluations >= max_evaluations:
+                    break
 
     elif operator_type == 'exchange':
-         # Iterate through all pairs of customers
-         cust_locations = [] # Store (cust_idx, d, r, c_pos)
-         for d in range(len(solution)):
-             for r_idx, r in enumerate(solution[d]):
-                 for c_pos in range(len(r)):
-                      cust_locations.append({'idx':r[c_pos], 'd':d, 'r':r_idx, 'c_pos':c_pos})
-
-         for i in range(len(cust_locations)):
-             for j in range(i + 1, len(cust_locations)):
-                 loc1 = cust_locations[i]
-                 loc2 = cust_locations[j]
-                 neighbor = apply_exchange(solution, loc1['d'], loc1['r'], loc1['c_pos'], loc2['d'], loc2['r'], loc2['c_pos'])
-                 if neighbor:
-                     obj, feasible, _ = calculate_total_objective(neighbor, cities, depots, demands, params)
-                     if feasible and obj < best_neighbor_objective:
-                         return neighbor, obj # First improvement
+        # Generate all possible exchange moves
+        exchange_moves = []
+        for d1 in range(len(solution)):
+            for r1_idx, r1 in enumerate(solution[d1]):
+                for c1_pos in range(len(r1)):
+                    for d2 in range(len(solution)):
+                        for r2_idx, r2 in enumerate(solution[d2]):
+                            for c2_pos in range(len(r2)):
+                                # Skip same position exchanges
+                                if d1==d2 and r1_idx==r2_idx and c1_pos==c2_pos: continue
+                                exchange_moves.append((d1, r1_idx, c1_pos, d2, r2_idx, c2_pos))
+        
+        random.shuffle(exchange_moves)
+        for move in exchange_moves:
+            d1, r1_idx, c1_pos, d2, r2_idx, c2_pos = move
+            neighbor = apply_exchange(solution, d1, r1_idx, c1_pos, d2, r2_idx, c2_pos)
+            if neighbor:
+                evaluations += 1
+                obj, feasible, _ = calculate_total_objective(neighbor, cities, depots, demands, params)
+                if feasible and obj < best_neighbor_objective:
+                    return neighbor, obj, evaluations  # First improvement
+                
+                if evaluations >= max_evaluations:
+                    break
 
     elif operator_type == 'two_opt_intra':
-        # Iterate through all routes and all possible 2-opt swaps within them
+        # Generate all possible 2-opt moves
+        two_opt_moves = []
         for d in range(len(solution)):
-            for r_idx, r in enumerate(solution[d]):
-                 if len(r) < 2: continue # Need at least 2 edges to swap
-                 for i in range(len(r) - 1):
-                     for k in range(i + 1, len(r)):
-                         neighbor = apply_two_opt_intra(solution, d, r_idx, i, k)
-                         if neighbor:
-                             obj, feasible, _ = calculate_total_objective(neighbor, cities, depots, demands, params)
-                             if feasible and obj < best_neighbor_objective:
-                                  return neighbor, obj # First improvement
+            for r_idx, route in enumerate(solution[d]):
+                if len(route) < 2: continue  # Need at least 2 customers
+                for i in range(len(route) - 1):
+                    for k in range(i + 1, len(route)):
+                        two_opt_moves.append((d, r_idx, i, k))
+        
+        random.shuffle(two_opt_moves)
+        for move in two_opt_moves:
+            d, r_idx, i, k = move
+            neighbor = apply_two_opt_intra(solution, d, r_idx, i, k)
+            if neighbor:
+                evaluations += 1
+                obj, feasible, _ = calculate_total_objective(neighbor, cities, depots, demands, params)
+                if feasible and obj < best_neighbor_objective:
+                    return neighbor, obj, evaluations  # First improvement
+                
+                if evaluations >= max_evaluations:
+                    break
 
-
-    return None, current_objective # No improvement found
+    return None, current_objective, evaluations  # No improvement found
 
 
 def shake_solution(solution, strength, cities, depots, demands, params):
-    """Applies `strength` random feasible moves (e.g., relocate) to perturb solution."""
+    """Applies `strength` random feasible moves (using multiple operators) to perturb solution."""
     shaken_solution = copy.deepcopy(solution)
     moves_applied = 0
     attempts = 0
@@ -373,33 +555,71 @@ def shake_solution(solution, strength, cities, depots, demands, params):
 
     while moves_applied < strength and attempts < max_attempts:
         attempts += 1
-        # Choose a random move type, e.g., relocate
-        # (Could add random exchange etc.)
+        
+        # Choose a random move type with equal probability
+        move_type = random.choice(['relocate', 'exchange', 'two_opt_intra'])
+        
+        if move_type == 'relocate':
+            # Select random customer to move
+            possible_origins = []
+            for d1 in range(len(shaken_solution)):
+                for r1_idx, r1 in enumerate(shaken_solution[d1]):
+                    for c1_pos in range(len(r1)):
+                        possible_origins.append((d1, r1_idx, c1_pos))
 
-        # Select random customer to move
-        possible_origins = []
-        for d1 in range(len(shaken_solution)):
-            for r1_idx, r1 in enumerate(shaken_solution[d1]):
-                for c1_pos in range(len(r1)):
-                    possible_origins.append((d1, r1_idx, c1_pos))
+            if not possible_origins: continue # No customers left to move
+            d1, r1_idx, c1_pos = random.choice(possible_origins)
 
-        if not possible_origins: break # No customers left to move
-        d1, r1_idx, c1_pos = random.choice(possible_origins)
+            # Select random target route and position
+            possible_targets = []
+            for d2 in range(len(shaken_solution)):
+                 for r2_idx, r2 in enumerate(shaken_solution[d2]):
+                     for c2_pos in range(len(r2) + 1):
+                          # Avoid moving to exact same spot
+                          if d1 == d2 and r1_idx == r2_idx and c1_pos == c2_pos: continue
+                          possible_targets.append((d2, r2_idx, c2_pos))
 
-        # Select random target route and position
-        possible_targets = []
-        for d2 in range(len(shaken_solution)):
-             for r2_idx, r2 in enumerate(shaken_solution[d2]):
-                 for c2_pos in range(len(r2) + 1):
-                      # Avoid moving to exact same spot
-                      if d1 == d2 and r1_idx == r2_idx and c1_pos == c2_pos: continue
-                      possible_targets.append((d2, r2_idx, c2_pos))
-        # Add possibility of creating new route if allowed (simplified: not implemented here)
+            if not possible_targets: continue # Cannot find target
+            d2, r2_idx, c2_pos = random.choice(possible_targets)
 
-        if not possible_targets: continue # Cannot find target
-        d2, r2_idx, c2_pos = random.choice(possible_targets)
-
-        neighbor = apply_relocate(shaken_solution, d1, r1_idx, c1_pos, d2, r2_idx, c2_pos)
+            neighbor = apply_relocate(shaken_solution, d1, r1_idx, c1_pos, d2, r2_idx, c2_pos)
+            
+        elif move_type == 'exchange':
+            # Select two random customers to exchange
+            possible_positions = []
+            for d in range(len(shaken_solution)):
+                for r_idx, route in enumerate(shaken_solution[d]):
+                    for c_pos in range(len(route)):
+                        possible_positions.append((d, r_idx, c_pos))
+            
+            if len(possible_positions) < 2: continue # Need at least 2 customers
+            pos1_idx = random.randint(0, len(possible_positions)-1)
+            pos1 = possible_positions[pos1_idx]
+            
+            # Pick a different second position
+            possible_positions_2 = [p for i, p in enumerate(possible_positions) if i != pos1_idx]
+            if not possible_positions_2: continue
+            pos2 = random.choice(possible_positions_2)
+            
+            neighbor = apply_exchange(shaken_solution, pos1[0], pos1[1], pos1[2], pos2[0], pos2[1], pos2[2])
+            
+        else: # two_opt_intra
+            # Select random route
+            route_positions = []
+            for d in range(len(shaken_solution)):
+                for r_idx, route in enumerate(shaken_solution[d]):
+                    if len(route) >= 2:  # Need at least 2 customers
+                        route_positions.append((d, r_idx))
+            
+            if not route_positions: continue
+            d, r_idx = random.choice(route_positions)
+            route = shaken_solution[d][r_idx]
+            
+            # Pick random segment to reverse
+            i = random.randint(0, len(route)-2)
+            k = random.randint(i+1, len(route)-1)
+            
+            neighbor = apply_two_opt_intra(shaken_solution, d, r_idx, i, k)
 
         if neighbor:
              _, feasible, _ = calculate_total_objective(neighbor, cities, depots, demands, params)
@@ -407,22 +627,47 @@ def shake_solution(solution, strength, cities, depots, demands, params):
                  shaken_solution = neighbor
                  moves_applied += 1
 
-    # st.write(f"Shake applied {moves_applied} moves after {attempts} attempts.")
     return shaken_solution
 
 
 # --- VNS Solver ---
 def vns_solver(cities, depots, demands, params, plot_placeholder, status_placeholder, length_placeholder, fig, ax):
     """Performs Variable Neighborhood Search."""
+    global route_cache
+    route_cache = {}  # Clear cache before starting
+    
+    # Create progress bar
+    progress_bar = st.progress(0)
+    
     status_placeholder.info("Generating initial solution...")
-    current_solution = simple_greedy_insertion(cities, depots, demands, params)
+    # Try more advanced construction heuristic (savings algorithm)
+    current_solution = savings_algorithm(cities, depots, demands, params)
     current_obj, feasible, _ = calculate_total_objective(current_solution, cities, depots, demands, params)
+    
+    # Fallback to greedy insertion if savings method fails
+    if not feasible:
+        status_placeholder.warning("Advanced initial solution failed. Trying greedy insertion...")
+        current_solution = simple_greedy_insertion(cities, depots, demands, params)
+        current_obj, feasible, _ = calculate_total_objective(current_solution, cities, depots, demands, params)
+        
     if not feasible:
         status_placeholder.error("Initial solution generation failed to find feasible solution.")
         return None, float('inf')
 
     best_solution = copy.deepcopy(current_solution)
     best_obj = current_obj
+    
+    # Display metrics with more information
+    metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
+    total_customers = len(cities)
+    with metrics_col1:
+        best_obj_metric = st.metric("Best Objective", f"{best_obj:.2f}")
+    with metrics_col2:
+        current_obj_metric = st.metric("Current Objective", f"{current_obj:.2f}")
+    with metrics_col3:
+        # Count vehicles used
+        total_vehicles = sum(len(routes) for routes in best_solution)
+        vehicles_metric = st.metric("Vehicles Used", f"{total_vehicles}/{len(depots) * params['max_vehicles_per_depot']}")
 
     plot_vrp_solution(cities, depots, best_solution, f"Initial Solution (Obj: {best_obj:.2f})", ax)
     plot_placeholder.pyplot(fig)
@@ -431,9 +676,22 @@ def vns_solver(cities, depots, demands, params, plot_placeholder, status_placeho
 
     iter_vns = 0
     iter_no_improve = 0
+    total_evaluations = 0
+    total_improvements = 0
+
+    # Stats tracking
+    stats = {
+        'iter_times': [],
+        'objectives': [current_obj],
+        'improvements': []
+    }
+    
+    start_time = time.time()
 
     while iter_vns < MAX_ITERATIONS_VNS and iter_no_improve < MAX_ITER_NO_IMPROVEMENT_VNS:
+        iter_start = time.time()
         iter_vns += 1
+        progress_bar.progress(iter_vns / MAX_ITERATIONS_VNS)
         k = 0 # Neighborhood index
         improvement_found_iter = False
 
@@ -441,27 +699,31 @@ def vns_solver(cities, depots, demands, params, plot_placeholder, status_placeho
 
         while k < len(NEIGHBORHOOD_ORDER_VNS):
             neighborhood_type = NEIGHBORHOOD_ORDER_VNS[k]
-            # st.write(f"Iter {iter_vns}, Exploring N_{k}: {neighborhood_type}")
 
             # Explore neighborhood Nk(current_solution)
             # Use first improvement strategy
-            neighbor_solution, neighbor_obj = explore_neighborhood(
+            neighbor_solution, neighbor_obj, evals = explore_neighborhood(
                 current_solution, neighborhood_type, cities, depots, demands, params, current_obj
             )
+            total_evaluations += evals
 
             if neighbor_solution: # Found an improving feasible solution
                 current_solution = neighbor_solution
                 current_obj = neighbor_obj
                 improvement_found_iter = True
-                # st.write(f"  -> Improvement found! New Obj: {current_obj:.2f}. Resetting to N_0.")
-                length_placeholder.metric("Current Objective", f"{current_obj:.2f}")
+                total_improvements += 1
+                stats['improvements'].append((iter_vns, k, current_obj))
+                
+                # Update metrics
+                current_obj_metric.metric("Current Objective", f"{current_obj:.2f}")
+                
+                # Plot improvement
                 plot_vrp_solution(cities, depots, current_solution, f"Iter {iter_vns} - N_{k} Improved (Obj: {current_obj:.2f})", ax)
                 plot_placeholder.pyplot(fig)
                 time.sleep(st.session_state.vns_delay)
 
                 k = 0 # Go back to the first neighborhood
             else:
-                # st.write(f"  -> No improvement in N_{k}.")
                 k += 1 # Move to the next neighborhood
 
         # Update best solution if current is better
@@ -469,33 +731,56 @@ def vns_solver(cities, depots, demands, params, plot_placeholder, status_placeho
              best_solution = copy.deepcopy(current_solution)
              best_obj = current_obj
              iter_no_improve = 0 # Reset counter
+             
+             # Update metrics
+             best_obj_metric.metric("Best Objective", f"{best_obj:.2f}")
+             total_vehicles = sum(len(routes) for routes in best_solution)
+             vehicles_metric.metric("Vehicles Used", f"{total_vehicles}/{len(depots) * params['max_vehicles_per_depot']}")
+             
              status_placeholder.info(f"Iteration {iter_vns}: **New Best Found!** Obj: {best_obj:.2f}")
-             # Maybe add another plot update for new best?
         else:
             # Only increment if no improvement was found *at all* in this iteration's neighborhood search
              if not improvement_found_iter:
                  iter_no_improve += 1
 
+        # Track stats
+        iter_time = time.time() - iter_start
+        stats['iter_times'].append(iter_time)
+        stats['objectives'].append(min(current_obj, stats['objectives'][-1]))
 
         # If no improvement in any neighborhood (k went through all), shake
-        if not improvement_found_iter and iter_no_improve < MAX_ITER_NO_IMPROVEMENT_VNS : # Avoid shaking on last iter if stopping due to no improvement
-            # st.write(f"Iter {iter_vns}: No improvement in any N_k. Shaking...")
+        if not improvement_found_iter and iter_no_improve < MAX_ITER_NO_IMPROVEMENT_VNS: # Avoid shaking on last iter if stopping due to no improvement
             status_placeholder.info(f"Iteration {iter_vns}: Shaking (No improvement: {iter_no_improve})...")
             current_solution = shake_solution(best_solution, SHAKE_STRENGTH_VNS, cities, depots, demands, params)
             current_obj, feasible, _ = calculate_total_objective(current_solution, cities, depots, demands, params)
             if not feasible:
                 # If shake produces infeasible, revert to best known feasible solution
-                # st.warning("Shake resulted in infeasible solution, reverting to best.")
                 current_solution = copy.deepcopy(best_solution)
                 current_obj = best_obj
+            # Update metrics after shake
+            current_obj_metric.metric("Current Objective", f"{current_obj:.2f}")
             # Plot after shake
             plot_vrp_solution(cities, depots, current_solution, f"Iter {iter_vns} - After Shake (Obj: {current_obj:.2f})", ax)
             plot_placeholder.pyplot(fig)
             length_placeholder.metric("Current Objective", f"{current_obj:.2f}")
             time.sleep(st.session_state.vns_delay)
 
-
-    status_placeholder.success(f"VNS Finished. Best Objective: {best_obj:.2f}")
+    total_time = time.time() - start_time
+    status_placeholder.success(f"VNS Finished in {total_time:.2f}s. Best Objective: {best_obj:.2f}")
+    
+    # Display final stats
+    st.write(f"Total evaluations: {total_evaluations}, Total improvements: {total_improvements}")
+    st.write(f"Average time per iteration: {sum(stats['iter_times'])/len(stats['iter_times']):.4f}s")
+    
+    # Plot convergence graph
+    fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
+    ax_conv.plot(range(len(stats['objectives'])), stats['objectives'], 'b-')
+    ax_conv.set_xlabel('Iteration')
+    ax_conv.set_ylabel('Best Objective')
+    ax_conv.set_title('Convergence History')
+    ax_conv.grid(True)
+    st.pyplot(fig_conv)
+    
     plot_vrp_solution(cities, depots, best_solution, f"Final Best Solution (Obj: {best_obj:.2f})", ax)
     plot_placeholder.pyplot(fig)
     length_placeholder.metric("Final Objective", f"{best_obj:.2f}")

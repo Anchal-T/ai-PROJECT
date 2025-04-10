@@ -462,14 +462,14 @@ def vns_solver(cities, depots, demands, params, plot_placeholder, status_placeho
 
 st.set_page_config(layout="wide")
 st.title("VNS for Multi-Depot VRP with Energy Constraints")
-st.markdown("Implementing VNS for the VRP defined in [Guo et al.](https://arxiv.org/abs/2402.15870).")
+# st.markdown("Implementing VNS for the VRP defined in [Guo et al.](https://arxiv.org/abs/2402.15870).")
 
 # Sidebar Controls
 st.sidebar.header("Problem Setup")
-num_customers = st.sidebar.slider("Number of Customers", 5, 50, 15)
-num_depots = st.sidebar.slider("Number of Depots", 1, 5, 2)
+num_customers = st.sidebar.slider("Number of Customers", 5, 50, 50)
+num_depots = st.sidebar.slider("Number of Depots", 1, 5, 5)
 params = DEFAULT_DRONE_PARAMS.copy()
-params['max_vehicles_per_depot'] = st.sidebar.slider("Max Vehicles per Depot", 1, 10, 3)
+params['max_vehicles_per_depot'] = st.sidebar.slider("Max Vehicles per Depot", 1, 10, 10)
 st.sidebar.subheader("Drone Parameters")
 st.sidebar.json(DEFAULT_DRONE_PARAMS, expanded=False)
 

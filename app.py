@@ -5,7 +5,7 @@ from graph_neighborhood_search import GraphNeighborhoodSearch
 
 def main():
     st.title("Graph Neural Neighborhood Search Visualization")
-    st.markdown("""
+    st.markdown(""" 
     This application demonstrates a simplified version of the Graph Neural Neighborhood Search algorithm 
     for solving Vehicle Routing Problems (VRP). The implementation focuses on the graph neighborhood structure
     and greedy search algorithm without the machine learning components.
@@ -55,7 +55,7 @@ def main():
         st.metric("Vehicle Capacity", vehicle_capacity)
     
     # Show solution metrics if solved
-    if hasattr(st.session_state, 'solved') and st.session_state.solved:
+    if 'solved' in st.session_state and st.session_state.solved:
         st.subheader("Solution")
         col1, col2 = st.columns(2)
         with col1:
@@ -85,7 +85,7 @@ def main():
     ax.scatter(solver.coords[0, 0], solver.coords[0, 1], c='red', s=100, marker='*', label='Depot')
     
     # Add demand labels
-    for i in range(1, solver.n_nodes):
+    for i in range(1, min(solver.n_nodes, len(solver.coords), len(solver.demands))):
         ax.text(solver.coords[i, 0] + 0.01, solver.coords[i, 1] + 0.01, 
                 f"{i}\n({solver.demands[i]:.1f})", fontsize=9)
     
@@ -98,7 +98,7 @@ def main():
                         'gray', alpha=0.2, linestyle='--')
     
     # Plot routes if solved
-    if hasattr(st.session_state, 'solved') and st.session_state.solved:
+    if 'solved' in st.session_state and st.session_state.solved:
         colors = plt.cm.rainbow(np.linspace(0, 1, len(solver.routes)))
         
         for i, route in enumerate(solver.routes):

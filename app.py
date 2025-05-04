@@ -691,70 +691,71 @@ def main():
         else:
             st.warning("Problem data (coordinates/demands) is inconsistent with the number of nodes. Please generate a new problem.")
 
-    
-    # Show neighborhood information
-    if st.checkbox("Show Neighborhood Details"):
-        st.subheader("Neighborhood Details")
-        # Use the actual number of nodes from the solver for the slider limit
-        node_idx = st.slider("Select Node", 0, solver.n_nodes - 1, 0) 
-        
-        # Add checks before accessing solver data based on node_idx
-        if node_idx < len(solver.coords) and node_idx < len(solver.demands) and node_idx < len(solver.nearest_neighbors):
-            st.write(f"Node {node_idx} coordinates: ({solver.coords[node_idx][0]:.3f}, {solver.coords[node_idx][1]:.3f})")
-            st.write(f"Demand: {solver.demands[node_idx]:.3f}")
+        # Show neighborhood information (MOVED INSIDE THE IF BLOCK)
+        if st.checkbox("Show Neighborhood Details"):
+            st.subheader("Neighborhood Details")
+            # Use the actual number of nodes from the solver for the slider limit
+            node_idx = st.slider("Select Node", 0, solver.n_nodes - 1, 0) 
             
-            st.write("K-Nearest Neighbors:")
-            neighbors = solver.nearest_neighbors[node_idx]
-            
-            # Create a small visualization of this node and its neighbors
-            fig_detail, ax_detail = plt.subplots(figsize=(6, 6))
-            
-            # Plot nodes (ensure coords is valid)
-            if len(solver.coords) > 0:
-                 ax_detail.scatter(solver.coords[:, 0], solver.coords[:, 1], c='lightgray', s=30)
-                 ax_detail.scatter(solver.coords[node_idx, 0], solver.coords[node_idx, 1], c='red', s=100, label=f'Node {node_idx}')
-            
-            # Plot neighbors
-            neighbor_data = []
-            if neighbors is not None:
-                for i, neighbor in enumerate(neighbors):
-                     # Check if neighbor index and distance matrix are valid
-                     if neighbor < len(solver.coords) and node_idx < solver.distance_matrix.shape[0] and neighbor < solver.distance_matrix.shape[1]:
-                         ax_detail.scatter(solver.coords[neighbor, 0], solver.coords[neighbor, 1], c='blue', s=80, label=f'Neighbor {i+1}')
-                         # Draw connection
-                         ax_detail.plot([solver.coords[node_idx, 0], solver.coords[neighbor, 0]], 
-                                 [solver.coords[node_idx, 1], solver.coords[neighbor, 1]], 
-                                 'blue', linestyle='-', alpha=0.6)
-                         
-                         # Add distance label
-                         mid_x = (solver.coords[node_idx, 0] + solver.coords[neighbor, 0]) / 2
-                         mid_y = (solver.coords[node_idx, 1] + solver.coords[neighbor, 1]) / 2
-                         dist = solver.distance_matrix[node_idx, neighbor]
-                         ax_detail.text(mid_x, mid_y, f"{dist:.3f}", fontsize=8, bbox=dict(boxstyle="round",fc="white", ec="gray", alpha=0.7))
-                         
-                         # Prepare data for table (check demands array validity)
-                         if neighbor < len(solver.demands):
-                             neighbor_data.append({
-                                 "Neighbor Node": neighbor,
-                                 "Distance": f"{dist:.4f}",
-                                 "Demand": f"{solver.demands[neighbor]:.2f}",
-                                 "Coordinates": f"({solver.coords[neighbor][0]:.3f}, {solver.coords[neighbor][1]:.3f})"
-                             })
-            
-            ax_detail.set_title(f"Neighbors of Node {node_idx}")
-            ax_detail.legend()
-            ax_detail.set_xlim(0, 1)
-            ax_detail.set_ylim(0, 1)
-            ax_detail.grid(True, linestyle='--', alpha=0.7)
-            
-            st.pyplot(fig_detail)
-            
-            # Show neighbor details in table
-            if neighbor_data:
-                st.table(neighbor_data)
-        else:
-             st.warning(f"Selected node index {node_idx} is out of bounds for the current problem data. Please generate a new problem or select a valid node.")
+            # Add checks before accessing solver data based on node_idx
+            if node_idx < len(solver.coords) and node_idx < len(solver.demands) and node_idx < len(solver.nearest_neighbors):
+                st.write(f"Node {node_idx} coordinates: ({solver.coords[node_idx][0]:.3f}, {solver.coords[node_idx][1]:.3f})")
+                st.write(f"Demand: {solver.demands[node_idx]:.3f}")
+                
+                st.write("K-Nearest Neighbors:")
+                neighbors = solver.nearest_neighbors[node_idx]
+                
+                # Create a small visualization of this node and its neighbors
+                fig_detail, ax_detail = plt.subplots(figsize=(6, 6))
+                
+                # Plot nodes (ensure coords is valid)
+                if len(solver.coords) > 0:
+                     ax_detail.scatter(solver.coords[:, 0], solver.coords[:, 1], c='lightgray', s=30)
+                     ax_detail.scatter(solver.coords[node_idx, 0], solver.coords[node_idx, 1], c='red', s=100, label=f'Node {node_idx}')
+                
+                # Plot neighbors
+                neighbor_data = []
+                if neighbors is not None:
+                    for i, neighbor in enumerate(neighbors):
+                         # Check if neighbor index and distance matrix are valid
+                         if neighbor < len(solver.coords) and node_idx < solver.distance_matrix.shape[0] and neighbor < solver.distance_matrix.shape[1]:
+                             ax_detail.scatter(solver.coords[neighbor, 0], solver.coords[neighbor, 1], c='blue', s=80, label=f'Neighbor {i+1}')
+                             # Draw connection
+                             ax_detail.plot([solver.coords[node_idx, 0], solver.coords[neighbor, 0]], 
+                                     [solver.coords[node_idx, 1], solver.coords[neighbor, 1]], 
+                                     'blue', linestyle='-', alpha=0.6)
+                             
+                             # Add distance label
+                             mid_x = (solver.coords[node_idx, 0] + solver.coords[neighbor, 0]) / 2
+                             mid_y = (solver.coords[node_idx, 1] + solver.coords[neighbor, 1]) / 2
+                             dist = solver.distance_matrix[node_idx, neighbor]
+                             ax_detail.text(mid_x, mid_y, f"{dist:.3f}", fontsize=8, bbox=dict(boxstyle="round",fc="white", ec="gray", alpha=0.7))
+                             
+                             # Prepare data for table (check demands array validity)
+                             if neighbor < len(solver.demands):
+                                 neighbor_data.append({
+                                     "Neighbor Node": neighbor,
+                                     "Distance": f"{dist:.4f}",
+                                     "Demand": f"{solver.demands[neighbor]:.2f}",
+                                     "Coordinates": f"({solver.coords[neighbor][0]:.3f}, {solver.coords[neighbor][1]:.3f})"
+                                 })
+                
+                ax_detail.set_title(f"Neighbors of Node {node_idx}")
+                ax_detail.legend()
+                ax_detail.set_xlim(0, 1)
+                ax_detail.set_ylim(0, 1)
+                ax_detail.grid(True, linestyle='--', alpha=0.7)
+                
+                st.pyplot(fig_detail)
+                
+                # Show neighbor details in table
+                if neighbor_data:
+                    st.table(neighbor_data)
+            else:
+                 st.warning(f"Selected node index {node_idx} is out of bounds for the current problem data. Please generate a new problem or select a valid node.")
 
+    elif app_mode == "Aerial Task Scheduling": # Handle the other mode
+        show_scheduling() # Call the function for the other mode
 
 if __name__ == "__main__":
     main()

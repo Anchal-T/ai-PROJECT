@@ -198,8 +198,7 @@ def main():
                          mid_x = (solver.coords[node_idx, 0] + solver.coords[neighbor, 0]) / 2
                          mid_y = (solver.coords[node_idx, 1] + solver.coords[neighbor, 1]) / 2
                          dist = solver.distance_matrix[node_idx, neighbor]
-                         ax_detail.text(mid_x, mid_y, f"{dist:.3f}", fontsize=8, bbox=dict(boxstyle="round", 
-                                                                               fc="white", ec="gray", alpha=0.7))
+                         ax_detail.text(mid_x, mid_y, f"{dist:.3f}", fontsize=8, bbox=dict(boxstyle="round",fc="white", ec="gray", alpha=0.7))
                          
                          # Prepare data for table (check demands array validity)
                          if neighbor < len(solver.demands):

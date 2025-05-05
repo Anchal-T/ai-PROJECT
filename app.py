@@ -1,3 +1,5 @@
+import torch.nn as nn
+from torch.nn import MultiheadAttention
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,7 +11,95 @@ import torch.nn.functional as F
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv, GATConv
 
+def build_initial_solution(customers, depots, N_i):
+    s0 = {i: {j: [depots[i], depots[i]] for j in range(N_i[i])} for i in depots}
+    RC = set(customers)
+    while RC:
+        regrets = {}
+        for ck in RC:
+            deltas = []
+            for i in s0:
+                for j in s0[i]:
+                    d = insertion_cost(s0[i][j], ck)
+                    deltas.append((d, i, j))
+            deltas.sort(key=lambda x: x[0])
+            if len(deltas) > 1:
+                rv = deltas[1][0] - deltas[0][0]
+            else:
+                rv = deltas[0][0]
+            regrets[ck] = (rv, deltas[0][1], deltas[0][2])
+        # pick ck* with max regret
+        ck_star, (rv, i_star, j_star) = max(regrets.items(), key=lambda x: x[1][0])
+        s0[i_star][j_star].insert(-1, ck_star)
+        RC.remove(ck_star)
+    return s0
 
+class DualGCN(nn.Module):
+    def __init__(self, in_dim, hid_dim, out_dim, heads=4):
+        super().__init__()
+        self.gcn1 = GCNConv(in_dim, hid_dim)
+        self.gcn2 = GCNConv(in_dim, hid_dim)
+        self.lin1 = nn.Linear(hid_dim, out_dim)
+        self.lin2 = nn.Linear(hid_dim, out_dim)
+        self.attn = MultiheadAttention(embed_dim=out_dim, num_heads=heads)
+        self.mlp = nn.Sequential(
+            nn.Linear(out_dim, out_dim),
+            nn.ReLU(),
+            nn.Linear(out_dim, out_dim)
+        )
+
+    def forward(self, x, edge_index_dis, edge_index_sol):
+        y1 = torch.relu(self.gcn1(x, edge_index_dis))
+        y2 = torch.relu(self.gcn2(x, edge_index_sol))
+        y1 = self.lin1(y1)
+        y2 = self.lin2(y2)
+        y = torch.stack([y1, y2], dim=0)
+        y, _ = self.attn(y, y, y)
+        fused = y.sum(dim=0)
+        return self.mlp(fused)
+
+def local_search(current_solution, operator):
+    best = current_solution
+    best_cost = cost(best)
+    for neighbor in operator(current_solution):
+        c = cost(neighbor)
+        if c < best_cost:
+            best, best_cost = neighbor, c
+    return best
+
+def reward_shaping(batch, init_cost):
+    omegas = [abs(cost(s) - init_cost) / init_cost for s, a, r, s_next in batch]
+    total_ω = sum(omegas) + 1e-8
+    shaped = []
+    for (s, a, r, s_next), ω in zip(batch, omegas):
+        shaped.append((s, a, ω * r / total_ω, s_next))
+    rs = [r_hat for _,_,r_hat,_ in shaped]
+    r_min, r_max = min(rs), max(rs)
+    normed = []
+    for s, a, r_hat, s_next in shaped:
+        if r_max > r_min:
+            r_hat = (r_hat - r_min) / (r_max - r_min)
+        normed.append((s, a, r_hat, s_next))
+    return normed
+
+def update_policy(replay_buffer, init_cost, gamma, q_net, target_q, optimizer, batch_size):
+    batch = random.sample(replay_buffer, batch_size)
+    shaped = reward_shaping(batch, init_cost)
+    losses = []
+    for s, a, r, s_next in shaped:
+        φ_s    = q_net(s.x, s.edge_index_dis, s.edge_index_sol)
+        φ_next = target_q(s_next.x, s_next.edge_index_dis, s_next.edge_index_sol)
+        q_val  = φ_s[a]
+        y      = r + gamma * φ_next.max()
+        losses.append((q_val - y).pow(2))
+    loss = torch.stack(losses).mean()
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    # soft update:
+    for p, p_t in zip(q_net.parameters(), target_q.parameters()):
+        p_t.data.mul_(0.95).add_(0.05, p.data)
+        
 class AerialScheduling:
     def __init__(self, num_vehicles, num_tasks, seed=42):
         random.seed(seed)
@@ -758,7 +848,6 @@ def main():
                 
     else:  
         show_scheduling()
-
-
+        
 if __name__ == "__main__":
     main()

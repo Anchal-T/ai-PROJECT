@@ -11,6 +11,21 @@ import torch.nn.functional as F
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv, GATConv
 
+def display_solution_graph(scheduler, schedule, cost):
+    G = scheduler.graph.copy()
+    fig, ax = plt.subplots(figsize=(10, 8))
+    pos = nx.spring_layout(G, seed=42)
+    nx.draw_networkx_nodes(G, pos, nodelist=[n for n in G.nodes() if n.startswith('V')], node_color='blue', node_size=700, alpha=0.8)
+    nx.draw_networkx_nodes(G, pos, nodelist=[n for n in G.nodes() if n.startswith('T')], node_color='green', node_size=700, alpha=0.8)
+    edges = [(v, t) for v, t in schedule.items()]
+    nx.draw_networkx_edges(G, pos, edgelist=edges, width=2, alpha=1, edge_color='red')
+    nx.draw_networkx_labels(G, pos, font_size=12)
+    labels = {(v, t): G[v][t]['weight'] for v, t in edges}
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=labels, font_size=10)
+    plt.title(f"Assignment (Cost: {cost})")
+    plt.axis('off')
+    st.pyplot(fig)
+
 def build_initial_solution(customers, depots, N_i):
     s0 = {i: {j: [depots[i], depots[i]] for j in range(N_i[i])} for i in depots}
     RC = set(customers)
@@ -766,6 +781,7 @@ def main():
                 
     else:  
         show_scheduling()
-        
+
+
 if __name__ == "__main__":
     main()

@@ -1,3 +1,6 @@
 venv/
 __pycache__/
 **/*.csv
+sample_code_generator.py
+streamlit_vns_vrp_energy.py
+vrp_solver.py

@@ -421,84 +421,19 @@ def calculate_total_cost(assignment, scheduling):
 # --- Visualize Assignments ---
 def visualize_assignments(scheduler, naive_schedule, optimized_schedule, run_number=None, improvement_percent=None):
     G = scheduler.graph.copy()
-    
-    # Create a subgraph with only the assigned edges
-    naive_edges = [(v, t) for v, t in naive_schedule.items()]
-    optimized_edges = [(v, t) for v, t in optimized_schedule.items()]
-    
-    plt.figure(figsize=(15, 6))
-    
-    # Plot naive assignment
-    plt.subplot(1, 2, 1)
-    pos = nx.spring_layout(G, seed=42)  # Fixed layout for comparison
-    
-    # Draw all nodes
-    nx.draw_networkx_nodes(G, pos, 
-                         nodelist=[n for n in G.nodes() if n.startswith('V')],
-                         node_color='blue', 
-                         node_size=700,
-                         alpha=0.8)
-    nx.draw_networkx_nodes(G, pos, 
-                         nodelist=[n for n in G.nodes() if n.startswith('T')],
-                         node_color='green', 
-                         node_size=700,
-                         alpha=0.8)
-    
-    # Draw assignment edges
-    nx.draw_networkx_edges(G, pos, 
-                         edgelist=naive_edges,
-                         width=2, alpha=1, edge_color='red')
-    
-    # Draw labels
-    nx.draw_networkx_labels(G, pos, font_size=12, font_family="sans-serif")
-    
-    # Edge labels
-    edge_labels = {(v, t): G[v][t]['weight'] for v, t in naive_edges}
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=10)
-    
-    title = f"Naive Assignment (Cost: {calculate_total_cost(naive_schedule, scheduler)})"
-    if run_number is not None:
-        title = f"Run {run_number}: " + title
-    plt.title(title)
+    fig, ax = plt.subplots(figsize=(10, 8))
+    pos = nx.spring_layout(G, seed=42)
+    nx.draw_networkx_nodes(G, pos, nodelist=[n for n in G.nodes() if n.startswith('V')], node_color='blue', node_size=700, alpha=0.8)
+    nx.draw_networkx_nodes(G, pos, nodelist=[n for n in G.nodes() if n.startswith('T')], node_color='green', node_size=700, alpha=0.8)
+    edges = [(v, t) for v, t in schedule.items()]
+    nx.draw_networkx_edges(G, pos, edgelist=edges, width=2, alpha=1, edge_color='red')
+    nx.draw_networkx_labels(G, pos, font_size=12)
+    labels = {(v, t): G[v][t]['weight'] for v, t in edges}
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=labels, font_size=10)
+    plt.title(f"Assignment (Cost: {cost})")
     plt.axis('off')
-    
-    # Plot optimized assignment
-    plt.subplot(1, 2, 2)
-    
-    # Draw all nodes
-    nx.draw_networkx_nodes(G, pos, 
-                         nodelist=[n for n in G.nodes() if n.startswith('V')],
-                         node_color='blue', 
-                         node_size=700,
-                         alpha=0.8)
-    nx.draw_networkx_nodes(G, pos, 
-                         nodelist=[n for n in G.nodes() if n.startswith('T')],
-                         node_color='green', 
-                         node_size=700,
-                         alpha=0.8)
-    
-    # Draw assignment edges
-    nx.draw_networkx_edges(G, pos, 
-                         edgelist=optimized_edges,
-                         width=2, alpha=1, edge_color='red')
-    
-    # Draw labels
-    nx.draw_networkx_labels(G, pos, font_size=12, font_family="sans-serif")
-    
-    # Edge labels
-    edge_labels = {(v, t): G[v][t]['weight'] for v, t in optimized_edges}
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=10)
-    
-    title = f"GNN Optimized Assignment (Cost: {calculate_total_cost(optimized_schedule, scheduler)})"
-    if improvement_percent is not None:
-        title += f" - Improvement: {improvement_percent:.2f}%"
-    plt.title(title)
-    plt.axis('off')
-    
-    plt.tight_layout()
-    plt.savefig('assignment_comparison.png')
-    plt.show()
-    
+    st.pyplot(fig)
+
 def show_scheduling():
     st.title("Aerial Task Scheduling with GNN")
     st.markdown("""
@@ -602,21 +537,6 @@ def show_scheduling():
             c2.metric("GNN Cost", f"{o_cost}")
             c3.metric("Improvement", f"{pct:.2f}%")
             st.markdown(f"The GNN approach is **{pct:.2f}%** better than naive.")
-
-def display_solution_graph(scheduler, schedule, cost):
-    G = scheduler.graph.copy()
-    fig, ax = plt.subplots(figsize=(10, 8))
-    pos = nx.spring_layout(G, seed=42)
-    nx.draw_networkx_nodes(G, pos, nodelist=[n for n in G.nodes() if n.startswith('V')], node_color='blue', node_size=700, alpha=0.8)
-    nx.draw_networkx_nodes(G, pos, nodelist=[n for n in G.nodes() if n.startswith('T')], node_color='green', node_size=700, alpha=0.8)
-    edges = [(v, t) for v, t in schedule.items()]
-    nx.draw_networkx_edges(G, pos, edgelist=edges, width=2, alpha=1, edge_color='red')
-    nx.draw_networkx_labels(G, pos, font_size=12)
-    labels = {(v, t): G[v][t]['weight'] for v, t in edges}
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=labels, font_size=10)
-    plt.title(f"Assignment (Cost: {cost})")
-    plt.axis('off')
-    st.pyplot(fig)
 
 def main():
     app_mode = st.sidebar.radio(
@@ -781,8 +701,7 @@ def main():
         else:
             st.warning("Problem data (coordinates/demands) is inconsistent with the number of nodes. Please generate a new problem.")
 
-        
-        # Show neighborhood information
+        # Show neighborhood information (MOVED INSIDE THE IF BLOCK)
         if st.checkbox("Show Neighborhood Details"):
             st.subheader("Neighborhood Details")
             # Use the actual number of nodes from the solver for the slider limit
@@ -801,36 +720,35 @@ def main():
                 
                 # Plot nodes (ensure coords is valid)
                 if len(solver.coords) > 0:
-                    ax_detail.scatter(solver.coords[:, 0], solver.coords[:, 1], c='lightgray', s=30)
-                    ax_detail.scatter(solver.coords[node_idx, 0], solver.coords[node_idx, 1], c='red', s=100, label=f'Node {node_idx}')
+                     ax_detail.scatter(solver.coords[:, 0], solver.coords[:, 1], c='lightgray', s=30)
+                     ax_detail.scatter(solver.coords[node_idx, 0], solver.coords[node_idx, 1], c='red', s=100, label=f'Node {node_idx}')
                 
                 # Plot neighbors
                 neighbor_data = []
                 if neighbors is not None:
                     for i, neighbor in enumerate(neighbors):
-                        # Check if neighbor index and distance matrix are valid
-                        if neighbor < len(solver.coords) and node_idx < solver.distance_matrix.shape[0] and neighbor < solver.distance_matrix.shape[1]:
-                            ax_detail.scatter(solver.coords[neighbor, 0], solver.coords[neighbor, 1], c='blue', s=80, label=f'Neighbor {i+1}')
-                            # Draw connection
-                            ax_detail.plot([solver.coords[node_idx, 0], solver.coords[neighbor, 0]], 
-                                    [solver.coords[node_idx, 1], solver.coords[neighbor, 1]], 
-                                    'blue', linestyle='-', alpha=0.6)
-                            
-                            # Add distance label
-                            mid_x = (solver.coords[node_idx, 0] + solver.coords[neighbor, 0]) / 2
-                            mid_y = (solver.coords[node_idx, 1] + solver.coords[neighbor, 1]) / 2
-                            dist = solver.distance_matrix[node_idx, neighbor]
-                            ax_detail.text(mid_x, mid_y, f"{dist:.3f}", fontsize=8, bbox=dict(boxstyle="round", 
-                                                                                fc="white", ec="gray", alpha=0.7))
-                            
-                            # Prepare data for table (check demands array validity)
-                            if neighbor < len(solver.demands):
-                                neighbor_data.append({
-                                    "Neighbor Node": neighbor,
-                                    "Distance": f"{dist:.4f}",
-                                    "Demand": f"{solver.demands[neighbor]:.2f}",
-                                    "Coordinates": f"({solver.coords[neighbor][0]:.3f}, {solver.coords[neighbor][1]:.3f})"
-                                })
+                         # Check if neighbor index and distance matrix are valid
+                         if neighbor < len(solver.coords) and node_idx < solver.distance_matrix.shape[0] and neighbor < solver.distance_matrix.shape[1]:
+                             ax_detail.scatter(solver.coords[neighbor, 0], solver.coords[neighbor, 1], c='blue', s=80, label=f'Neighbor {i+1}')
+                             # Draw connection
+                             ax_detail.plot([solver.coords[node_idx, 0], solver.coords[neighbor, 0]], 
+                                     [solver.coords[node_idx, 1], solver.coords[neighbor, 1]], 
+                                     'blue', linestyle='-', alpha=0.6)
+                             
+                             # Add distance label
+                             mid_x = (solver.coords[node_idx, 0] + solver.coords[neighbor, 0]) / 2
+                             mid_y = (solver.coords[node_idx, 1] + solver.coords[neighbor, 1]) / 2
+                             dist = solver.distance_matrix[node_idx, neighbor]
+                             ax_detail.text(mid_x, mid_y, f"{dist:.3f}", fontsize=8, bbox=dict(boxstyle="round",fc="white", ec="gray", alpha=0.7))
+                             
+                             # Prepare data for table (check demands array validity)
+                             if neighbor < len(solver.demands):
+                                 neighbor_data.append({
+                                     "Neighbor Node": neighbor,
+                                     "Distance": f"{dist:.4f}",
+                                     "Demand": f"{solver.demands[neighbor]:.2f}",
+                                     "Coordinates": f"({solver.coords[neighbor][0]:.3f}, {solver.coords[neighbor][1]:.3f})"
+                                 })
                 
                 ax_detail.set_title(f"Neighbors of Node {node_idx}")
                 ax_detail.legend()

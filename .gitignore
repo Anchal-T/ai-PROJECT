@@ -7,3 +7,13 @@ vrp_solver.py
 
 miniconda*.exe
 Miniconda*.exe
+# Miniconda installers and environments
+[Mm]iniconda*.exe
+*[Mm]iniconda*.exe
+.conda/
+conda-meta/
+envs/
+etc/
+Library/
+Scripts/
+*conda*/

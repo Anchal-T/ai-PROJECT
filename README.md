@@ -181,8 +181,8 @@ MIT License - See [LICENSE](LICENSE) file
 
 ## 👥 Contributors
 
--   [Your Name]
--   [Other Contributors]
+-   Anchal Tandekar
+-   Rejwanul Hoque, Zulqarnain Ahmed
 
 ## 🙏 Acknowledgments
 

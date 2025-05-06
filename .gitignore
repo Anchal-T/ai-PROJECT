@@ -4,3 +4,16 @@ __pycache__/
 sample_code_generator.py
 streamlit_vns_vrp_energy.py
 vrp_solver.py
+
+miniconda*.exe
+Miniconda*.exe
+# Miniconda installers and environments
+[Mm]iniconda*.exe
+*[Mm]iniconda*.exe
+.conda/
+conda-meta/
+envs/
+etc/
+Library/
+Scripts/
+*conda*/

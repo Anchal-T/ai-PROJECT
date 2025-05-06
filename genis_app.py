@@ -278,17 +278,13 @@ def main():
             st.subheader("Solution Details")
             
             # Show tour information
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**Tour:**")
-                tour_str = " → ".join([str(node) for node in st.session_state.env.tour])
-                st.code(tour_str)
-            
-            with col2:
-                st.write("**Solution Cost:**")
-                st.info(f"{st.session_state.env.current_cost:.2f}")
-    
+            st.write("**Tour:**")
+            tour_str = " → ".join([str(node) for node in st.session_state.env.tour])
+            st.code(tour_str)
+
+            st.write("**Solution Cost:**")
+            st.info(f"{st.session_state.env.current_cost:.2f}")
+
     with tab2:
         # About GENIS section
         st.header("About GENIS")

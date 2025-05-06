@@ -5,4 +5,5 @@ sample_code_generator.py
 streamlit_vns_vrp_energy.py
 vrp_solver.py
 
-RL-GENIS/miniconda.exe
+miniconda*.exe
+Miniconda*.exe
